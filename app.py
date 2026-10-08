@@ -1,49 +1,43 @@
 from flask import Flask, request, jsonify, send_from_directory
-import os
+import os, uuid
 app = Flask(__name__)
-MY_SECRET_KEY = "12345"
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-@app.route('/')
+file_map = {}
+@app.route("/")
 def home():
-    return "Server OK! /get-data?key=12345 e jao"
-
-@app.route('/get-data')
-def get_data():
-    key = request.args.get('key')
-    if key != MY_SECRET_KEY:
-        return jsonify({"error": "Key vul"})
-    files = os.listdir(UPLOAD_FOLDER)
-    total_size = sum(os.path.getsize(os.path.join(UPLOAD_FOLDER, f)) for f in files) if files else 0
-    return jsonify({"message": "Server OK", "total_files": len(files), "files": files, "used_MB": round(total_size/(1024*1024),2), "limit_MB": 500})
-
-@app.route('/upload', methods=['POST'])
+    return "Server OK! /get-data?key=YOUR_KEY e jao | /upload e file upload koro"
+@app.route("/upload", methods=["POST"])
 def upload():
-    key = request.args.get('key')
-    if key != MY_SECRET_KEY:
-        return "Key vul", 403
-    file = request.files.get('file')
-    if not file:
-        return jsonify({"error": "file pathao"}), 400
-    file.save(os.path.join(UPLOAD_FOLDER, file.filename))
-    return jsonify({"status": "saved", "file": file.filename})
-
-@app.route('/download/<filename>')
-def download(filename):
-    key = request.args.get('key')
-    if key != MY_SECRET_KEY:
-        return "Key vul", 403
-    return send_from_directory(UPLOAD_FOLDER, filename)
-
-@app.route('/delete/<filename>')
-def delete(filename):
-    key = request.args.get('key')
-    if key != MY_SECRET_KEY:
-        return "Key vul", 403
-    os.remove(os.path.join(UPLOAD_FOLDER, filename))
-    return jsonify({"deleted": filename})
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    if 'file' not in request.files:
+        return jsonify({"error": "no file"}), 400
+    f = request.files['file']
+    key = str(uuid.uuid4())[:8]
+    filename = f"{key}_{f.filename}"
+    path = os.path.join(UPLOAD_FOLDER, filename)
+    f.save(path)
+    file_map[key] = filename
+    with open(os.path.join(UPLOAD_FOLDER, f"{key}.txt"), "w") as mf:
+        mf.write(filename)
+    return jsonify({"key": key, "download_url": f"/get-data?key={key}"})
+@app.route("/get-data")
+def get_data():
+    key = request.args.get("key")
+    if not key:
+        return "key dao?key=12345", 400
+    filename = file_map.get(key)
+    if not filename:
+        txt_path = os.path.join(UPLOAD_FOLDER, f"{key}.txt")
+        if os.path.exists(txt_path):
+            with open(txt_path) as mf:
+                filename = mf.read().strip()
+        else:
+            for fn in os.listdir(UPLOAD_FOLDER):
+                if fn.startswith(key+"_"):
+                    filename = fn
+                    break
+    if not filename:
+        return "File not found", 404
+    return send_from_directory(UPLOAD_FOLDER, filename, as_attachment=True)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
